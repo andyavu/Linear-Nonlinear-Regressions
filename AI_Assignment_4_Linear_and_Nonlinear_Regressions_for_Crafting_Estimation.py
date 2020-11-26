@@ -92,11 +92,16 @@ validation_split = 0.3
 #Let the first N*validation_split rows be for the validation set 
 #and the last N*(1-validation_split) rows be the training data
 
-Y = None 
-Y_validation = None 
+Y = data[int(data.shape[0] * validation_split):, 0:1]
+Y_validation = data[0:int(data.shape[0] * validation_split), 0:1]
 
-X = None 
-X_validation = None
+X = data[int(data.shape[0] * validation_split):, 1:]
+X_validation = data[0:int(data.shape[0] * validation_split), 1:]
+
+print(Y.shape)
+print(X.shape)
+print(Y_validation.shape)
+print(X_validation.shape)
 
 """Now we will use Least Squares Regression to estimate the time cost associated with a given state and end state.  
 
@@ -120,10 +125,17 @@ Next, compare using `np.linalg.lstsq` -- numpy's built in least squares regressi
 #TODO replace the np.zeros() with the correct code
 
 def calculate_weights_with_linear_algebra(X: np.array, Y: np.array) -> np.array:
-    return None
+    Xt_X = X.T.dot(X)               # X^T * X
+    Xt_X_inv = np.linalg.inv(Xt_X)  # (X^T * X)^-1
+    Xt_Y = X.T.dot(Y)               # X^T * Y
+    B = Xt_X_inv.dot(Xt_Y)          # ((X^T * X)^-1) * (X^T * Y)
+    return B
+
 
 def calculate_weights_with_library(X: np.array, Y: np.array) -> np.array:
-    return None
+    x, residuals, rank, s = np.linalg.lstsq(X, Y)
+    return x
+
 
 B_raw = calculate_weights_with_linear_algebra(X,Y)
 B_lstsq = calculate_weights_with_library(X,Y)
@@ -153,13 +165,13 @@ To do this we will use the elementwise multiplication (`a*b` not `np.dot(a,b)`),
 #TODO: Calculate Yhat, the residuals and RMSE for both the training and validation sets
 
 def calculate_yhat(X: np.array, B: np.array) -> np.array:
-    return None
+    return X.dot(B)
 
 def calculate_residuals(Y: np.array, Yhat: np.array) -> np.array:
-    return None
+    return Y - Yhat
 
 def calculate_rmse(residuals: np.array) -> float:
-    return 0
+    return np.sqrt((1 / data.shape[0]) * ((residuals) ** 2).mean())
 
 
 Yhat = calculate_yhat(X, B_raw)
@@ -209,8 +221,8 @@ e.g.
 
 #TODO construct an X matrix with a bias term. 
 
-X_with_bias = np.zeros(10)
-X_validation_with_bias = np.zeros(10)
+X_with_bias = np.hstack((X, np.ones((X.shape[0], 1), dtype=X.dtype)))
+X_validation_with_bias = np.hstack((X_validation, np.ones((X_validation.shape[0], 1), dtype=X_validation.dtype)))
 
 #TODO replace the np.zeros() with the correct code
 B_with_bias = calculate_weights_with_library(X_with_bias,Y)
@@ -258,7 +270,9 @@ import torch
 #TODO construct the model
 # Define a neural network model as a stack of layers
 model = torch.nn.Sequential(
-    
+    torch.nn.Linear(X.shape[1], 1, bias=True),
+    # torch.nn.Linear(X.shape[1], 1, bias=True),
+    # torch.nn.Linear(X.shape[1], 1, bias=True)
 )
 model.to('cuda')
 
@@ -298,42 +312,42 @@ Yt = torch.Tensor(Y.reshape((len(Y), 1))).to('cuda')
 
 def train(X: torch.Tensor, Y: torch.Tensor, model: torch.nn.Module, epochs:int) -> None:
     #TODO set the optimizer and loss functions
-    optimizer = None
+    optimizer = torch.optim.SGD(model.parameters(),lr=0.01)
 
     #TODO set the loss function
     # We'll use mean squared error as our loss function
-    loss_fn = None
-    for t in range(epochs):
+    loss_fn = torch.nn.MSELoss()
 
+    for t in range(epochs):
         #TODO do the training steps here
         #1. zero the gradient buffers
         #1. Clear out the "gradient", i.e. the old update amounts
-
+        optimizer.zero_grad()
+        model.zero_grad()
         #2. Make a prediction
-
+        Yhat = model.forward(Xt)
         #3. Calculate loss (the error of the residual)
-
+        loss = loss_fn(Yhat, Yt)
         if t % 100 == 0:
             print(t,loss.item())
 
         #4. Run the loss backwards through the graph
-
+        loss.backward()
         #5. Run the optimizer to update the weights
-    
+        optimizer.step()
 train(Xt,Yt,model, 5000)
 
 
 
 """Now we want to see how it did.  We will plot the residuals (i.e. the error) for both our training set and our validation set.  It is always important to have a validation set, as it will let us see how well our model is over (or under) fitting the data."""
 
-Yhat = model.forward(Xt).data.numpy()
+Yhat = model.forward(Xt).cpu().data.numpy()
 
 residual  = calculate_residuals(Y, Yhat)
 
 plt.plot(Y,residual,'x')
 
-
-Yhat_validation = model.forward(torch.Tensor(X_validation)).data.numpy()
+Yhat_validation = model.forward(torch.Tensor(X_validation).type(torch.FloatTensor).cuda()).cpu().data.numpy()
 
 residual_validation  = calculate_residuals(Y_validation, Yhat_validation)
 
@@ -357,8 +371,10 @@ Again, your model summary should look similar to below (layer weights will be di
 hidden_units = 100
 #TODO construct the model
 # Define a neural network model as a stack of layers
+
 model = torch.nn.Sequential(
-   
+    torch.nn.Linear(X.shape[1], hidden_units, bias=True),
+    torch.nn.Linear(hidden_units, 1, bias=True)
 )
 
 model.to('cuda')
@@ -393,40 +409,40 @@ Copy your model construction with the hidden layers from above, and then set up 
 
 def train_with_gradient_clipping(X: torch.Tensor, Y: torch.Tensor, model: torch.nn.Module, epochs:int) -> None:
     #TODO set the optimizer and loss functions
-    optimizer = None
+    optimizer = torch.optim.SGD(model.parameters(),lr=0.01)
 
     #TODO set the loss function
     # We'll use mean squared error as our loss function
-    loss_fn = None
+    loss_fn = torch.nn.MSELoss()
     for t in range(epochs):
 
         #TODO do the training steps here
         #1. zero the gradient buffers
         #1. Clear out the "gradient", i.e. the old update amounts
-
+        optimizer.zero_grad()
+        model.zero_grad()
         #2. Make a prediction
-
+        Yhat = model.forward(Xt)
         #3. Calculate loss (the error of the residual)
-
+        loss = loss_fn(Yhat,Yt)
         if t % 100 == 0:
             print(t,loss.item())
 
         #4. Run the loss backwards through the graph
-
+        loss.backward()
         #5. Clip the gradients
-        
+        torch.nn.utils.clip_grad_norm_(model.parameters(),5)
         #6. Run the optimizer to update the weights
-    
+        optimizer.step()
 train_with_gradient_clipping(Xt,Yt,model, 5000)
 
-Yhat = model.forward(Xt).data.numpy()
+Yhat = model.forward(Xt).cpu().data.numpy()
 
 residual  = calculate_residuals(Y, Yhat)
 
 plt.plot(Y,residual,'x')
 
-
-Yhat_validation = model.forward(torch.Tensor(X_validation)).data.numpy()
+Yhat_validation = model.forward(torch.Tensor(X_validation).type(torch.FloatTensor).cuda()).cpu().data.numpy()
 
 residual_validation  = calculate_residuals(Y_validation, Yhat_validation)
 
@@ -450,31 +466,35 @@ This means we should now have a Sequential model with
 
 #Step 9 -- Create a non-linear multi layer Neural Network (10 pts)
 * Your network should be two layers like above, but should have a non-linear activation function (the ReLU) (e.g.  Input -> Hidden, ReLU, Hidden -> Output)
+
 """
 
 hidden_units = 100
 #TODO construct the model
 # Define a neural network model as a stack of layers
 model = torch.nn.Sequential(
-    
+    torch.nn.Linear(X.shape[1], hidden_units, bias=True),
+    torch.nn.ReLU(),
+    torch.nn.Linear(hidden_units, 1, bias=True)
 )
 
 
 model.to('cuda')
 print(list(model.parameters()))
 
-"""Use the optimization code with the gradient clipping from above to train our new, non-linear, model.  I recommend letting it run for about 10000 epochs."""
+"""Use the optimization code with the gradient clipping from above to train our new, non-linear, model.  I recommend letting it run for about 10000 epochs.
+
+"""
 
 train_with_gradient_clipping(Xt,Yt,model, 10000)
 
-Yhat = model.forward(Xt).data.numpy()
+Yhat = model.forward(Xt).cpu().data.numpy()
 
 residual  = calculate_residuals(Y, Yhat)
 
 plt.plot(Y,residual,'x')
 
-
-Yhat_validation = model.forward(torch.Tensor(X_validation)).data.numpy()
+Yhat_validation = model.forward(torch.Tensor(X_validation).type(torch.FloatTensor).cuda()).cpu().data.numpy()
 
 residual_validation  = calculate_residuals(Y_validation, Yhat_validation)
 
